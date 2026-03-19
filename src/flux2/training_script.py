@@ -15,23 +15,31 @@ Because images have variable sizes, batch_size=1 is the default.
 For larger batches, add a bucketed sampler that groups images by resolution.
 
 #### Training Script Launch ####
+# smoke test (2 batches):
+# HF_HUB_OFFLINE=1 python -m flux2.training_script \
+#     --device cuda --steps 2 --val_every 2 --log_every 1 \
+#     --save_every 9999 --val_size 2 --val_num_steps 5 --output_dir lora_output
+
+# full training (~3 epochs over 4152 examples):
 HF_HUB_OFFLINE=1 python -m flux2.training_script \
     --device cuda \
-    --steps 2 \
-    --val_every 2 \
-    --log_every 1 \
-    --save_every 9999 \
-    --val_size 2 \
-    --val_num_steps 5 \
+    --steps 12000 \
+    --val_every 500 \
+    --log_every 50 \
+    --save_every 1000 \
+    --val_size 50 \
+    --val_num_steps 20 \
     --output_dir lora_output
 
-#### Tenssorboard Launch ####
-(local) tensorboard --logdir lora_output/runs 
+#### TensorBoard Launch ####
+# local:
+#   tensorboard --logdir lora_output/runs
+#   open http://localhost:6006
 
-remote launch
-(remote) tensorboard --logdir lora_output/runs --host 0.0.0.0 --port 6006
-(local) ssh -L 6006:localhost:6006 user@remote-host
-(local) http://localhost:6006
+# remote:
+#   (remote) tensorboard --logdir lora_output/runs --host 0.0.0.0 --port 6006
+#   (local)  ssh -L 6006:localhost:6006 user@remote-host
+#   (local)  open http://localhost:6006
 """
 
 import argparse

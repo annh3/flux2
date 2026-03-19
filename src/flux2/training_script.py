@@ -20,15 +20,15 @@ For larger batches, add a bucketed sampler that groups images by resolution.
 #     --device cuda --steps 2 --val_every 2 --log_every 1 \
 #     --save_every 9999 --val_size 2 --val_num_steps 5 --output_dir lora_output
 
-# full training (~3 epochs over 4152 examples):
+# full training (5 epochs over ~4104 examples = 20520 steps):
 HF_HUB_OFFLINE=1 python -m flux2.training_script \
     --device cuda \
-    --steps 12000 \
+    --steps 20520 \
     --val_every 500 \
     --log_every 50 \
     --save_every 1000 \
     --val_size 50 \
-    --val_num_steps 20 \
+    --val_num_steps 4 \
     --output_dir lora_output
 
 #### TensorBoard Launch ####
@@ -37,8 +37,8 @@ HF_HUB_OFFLINE=1 python -m flux2.training_script \
 #   open http://localhost:6006
 
 # remote:
-#   (remote) tensorboard --logdir lora_output/runs --host 0.0.0.0 --port 6006
-#   (local)  ssh -L 6006:localhost:6006 user@remote-host
+#   (remote) tensorboard --logdir ~/flux2/src/flux2/lora_output/runs --host 0.0.0.0 --port 6006
+#   (local)  ssh -L 6006:localhost:6006 ubuntu@192.222.57.214
 #   (local)  open http://localhost:6006
 """
 
@@ -160,10 +160,15 @@ class HFImageDataset(Dataset):
         return len(self.ds)
 
     def __getitem__(self, idx: int) -> dict:
-        row = self.ds[idx]
-        image: Image.Image = row[self.image_field]
-        caption: str = row.get(self.caption_field, "") or ""
-        return {"image": image, "caption": caption}
+        while True:
+            try:
+                row = self.ds[idx]
+                image: Image.Image = row[self.image_field]
+                image.load()  # force decode so truncated images fail here
+                caption: str = row.get(self.caption_field, "") or ""
+                return {"image": image, "caption": caption}
+            except OSError:
+                idx = (idx + 1) % len(self.ds)
 
 
 def collate_pil(batch: list[dict]) -> dict:

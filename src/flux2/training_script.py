@@ -317,7 +317,7 @@ def validate_loss(
         txt_ids     = encoded["txt_ids"]
 
         noise = torch.randn_like(img_latents)
-        t = sample_timesteps(1, device)
+        t = sample_timesteps(1, device).to(dtype)
         t_exp = t[:, None, None]
         x_t = t_exp * img_latents + (1.0 - t_exp) * noise
         target_velocity = img_latents - noise

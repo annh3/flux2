@@ -29,9 +29,9 @@ HF_HUB_OFFLINE=1 python -m flux2.training_script \
     --save_every 1000 \
     --val_size 50 \
     --val_num_steps 4 \
-    --rank 32 \
+    --rank 16 \
     --alpha 32.0 \
-    --lr 5e-4 \
+    --lr 1e-4 \
     --output_dir lora_output
 
 #### TensorBoard Launch ####

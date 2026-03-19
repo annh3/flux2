@@ -100,10 +100,15 @@ def inject_lora(model, rank: int = 16, alpha: float = 16.0) -> None:
         _replace(block, "linear1", rank, alpha)
         _replace(block, "linear2", rank, alpha)
 
+    device = next(model.parameters()).device
+    dtype = next(model.parameters()).dtype
+
     for p in model.parameters():
         p.requires_grad_(False)
     for module in model.modules():
         if isinstance(module, LoRALinear):
+            module.lora_A.to(device=device, dtype=dtype)
+            module.lora_B.to(device=device, dtype=dtype)
             module.lora_A.weight.requires_grad_(True)
             module.lora_B.weight.requires_grad_(True)
 

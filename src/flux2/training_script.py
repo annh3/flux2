@@ -332,8 +332,8 @@ def validate_loss(
         noise = torch.randn_like(img_latents)
         t = sample_timesteps(1, device).to(dtype)
         t_exp = t[:, None, None]
-        x_t = t_exp * img_latents + (1.0 - t_exp) * noise
-        target_velocity = img_latents - noise
+        x_t = t_exp * noise + (1.0 - t_exp) * img_latents
+        target_velocity = noise - img_latents
 
         pred = model(x=x_t, x_ids=img_ids, timesteps=t, ctx=txt_embeds, ctx_ids=txt_ids, guidance=None)
         total_loss += torch.mean((pred - target_velocity) ** 2).item()
@@ -416,11 +416,15 @@ def train(args):
             B = img_latents.shape[0]
 
             # --- Rectified flow forward process ---
+            # Convention: t=1 is pure noise, t=0 is clean.
+            # x_t = t * noise + (1-t) * clean  →  target velocity = noise - clean
+            # Inference Euler step: img += (t_prev - t_curr) * pred  (negative dt)
+            # negative * (noise - clean) = positive * (clean - noise) → moves toward clean ✓
             noise = torch.randn_like(img_latents)
             t = sample_timesteps(B, device).to(dtype)          # [B]
             t_exp = t[:, None, None]                           # [B, 1, 1]
-            x_t = t_exp * img_latents + (1.0 - t_exp) * noise
-            target_velocity = img_latents - noise
+            x_t = t_exp * noise + (1.0 - t_exp) * img_latents
+            target_velocity = noise - img_latents
 
             # --- Forward pass (Klein9B: guidance=None) ---
             pred_velocity = model(

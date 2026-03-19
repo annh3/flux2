@@ -20,8 +20,9 @@ import json
 import os
 
 import torch
+from PIL import Image
 
-from flux2.sampling import batched_prc_img, get_schedule, scatter_ids
+from flux2.sampling import batched_prc_img, denoise, get_schedule, prc_txt, scatter_ids
 from flux2.util import load_ae, load_flow_model, load_text_encoder
 
 PROMPTS = [
@@ -59,21 +60,18 @@ def generate_images(model, ae, text_encoder, prompts, device, dtype, output_dir)
         img_ids = img_ids.to(device=device)
 
         txt_embed = text_encoder([prompt])
-        from flux2.sampling import prc_txt
         txt_tok, txt_ids = prc_txt(txt_embed[0])
         txt_tok = txt_tok.unsqueeze(0).to(device=device, dtype=dtype)
         txt_ids = txt_ids.unsqueeze(0).to(device=device)
 
         timesteps = get_schedule(NUM_STEPS, img_tok.shape[1])
 
-        from flux2.sampling import denoise
         x = denoise(model, img_tok, img_ids, txt_tok, txt_ids, timesteps, guidance=1.0)
 
-        x_spatial = scatter_ids(x, img_ids).squeeze(2)  # [1, 128, h, w] approx
+        x_spatial = torch.cat(scatter_ids(x, img_ids)).squeeze(2)
         img_decoded = ae.decode(x_spatial)
         img_decoded = img_decoded.clamp(-1, 1)
 
-        from PIL import Image
         arr = (127.5 * (img_decoded[0].permute(1, 2, 0) + 1.0)).cpu().byte().numpy()
         pil = Image.fromarray(arr)
         fname = os.path.join(output_dir, f"prompt_{idx + 1:02d}.png")

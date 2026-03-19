@@ -2,13 +2,21 @@
 Compare full Klein9B vs. a pruned variant (blocks dropped) on a fixed set of prompts.
 
 Usage:
+    # Manual: specify block indices to drop
     python -m flux2.compare_pruned \
         --drop_double 3 7 \
         --drop_single 20 23 \
         --output_dir artifacts
+
+    # Automatic: drop the top-N most important blocks (highest MAD)
+    python -m flux2.compare_pruned \
+        --drop_n 2 \
+        --importance_json artifacts/block_importance.json \
+        --output_dir artifacts
 """
 
 import argparse
+import json
 import os
 
 import torch
@@ -73,6 +81,19 @@ def generate_images(model, ae, text_encoder, prompts, device, dtype, output_dir)
         print(f"  Saved {fname}")
 
 
+def load_drop_indices(importance_json, drop_n):
+    with open(importance_json) as f:
+        data = json.load(f)
+    ranked = data["ranked"]  # sorted descending by MAD
+    top_n = ranked[:drop_n]
+    drop_double = {e["index"] for e in top_n if e["type"] == "double"}
+    drop_single = {e["index"] for e in top_n if e["type"] == "single"}
+    print(f"Top-{drop_n} most important blocks to drop:")
+    for e in top_n:
+        print(f"  {e['type']:>6} block {e['index']:>2}  MAD={e['mad']:.6f}")
+    return drop_double, drop_single
+
+
 def main(args):
     device = torch.device(args.device)
     dtype = torch.bfloat16
@@ -83,8 +104,12 @@ def main(args):
     ae.eval()
     text_encoder.eval()
 
-    drop_double = set(args.drop_double or [])
-    drop_single = set(args.drop_single or [])
+    if args.drop_n is not None:
+        assert args.importance_json, "--importance_json is required when using --drop_n"
+        drop_double, drop_single = load_drop_indices(args.importance_json, args.drop_n)
+    else:
+        drop_double = set(args.drop_double or [])
+        drop_single = set(args.drop_single or [])
 
     # --- Full model ---
     print("Generating with full model...")
@@ -111,9 +136,13 @@ def main(args):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--drop_double", type=int, nargs="*", default=[], metavar="IDX",
-                   help="Double-stream block indices to drop")
+                   help="Double-stream block indices to drop (manual)")
     p.add_argument("--drop_single", type=int, nargs="*", default=[], metavar="IDX",
-                   help="Single-stream block indices to drop")
+                   help="Single-stream block indices to drop (manual)")
+    p.add_argument("--drop_n", type=int, default=None,
+                   help="Automatically drop the top-N most important blocks from block_importance.json")
+    p.add_argument("--importance_json", default="artifacts/block_importance.json",
+                   help="Path to block_importance.json produced by block_importance.py")
     p.add_argument("--output_dir", default="artifacts")
     p.add_argument("--device", default="cuda")
     return p.parse_args()

@@ -29,6 +29,9 @@ HF_HUB_OFFLINE=1 python -m flux2.training_script \
     --save_every 1000 \
     --val_size 50 \
     --val_num_steps 4 \
+    --rank 32 \
+    --alpha 32.0 \
+    --lr 5e-4 \
     --output_dir lora_output
 
 #### TensorBoard Launch ####
@@ -492,9 +495,9 @@ def parse_args():
     p.add_argument("--caption_field", default="image_description", help="HF dataset column to use as prompt")
     p.add_argument("--image_field",   default="1600px",            help="HF dataset column containing PIL images")
     p.add_argument("--output_dir",    default="lora_output")
-    p.add_argument("--rank",          type=int,   default=16)
-    p.add_argument("--alpha",         type=float, default=16.0)
-    p.add_argument("--lr",            type=float, default=1e-4)
+    p.add_argument("--rank",          type=int,   default=32)
+    p.add_argument("--alpha",         type=float, default=32.0)
+    p.add_argument("--lr",            type=float, default=5e-4)
     p.add_argument("--weight_decay",  type=float, default=1e-2)
     p.add_argument("--batch_size",    type=int,   default=1,
                    help="batch_size>1 requires images of identical resolution or a bucketed sampler")

@@ -15,8 +15,8 @@ Because images have variable sizes, batch_size=1 is the default.
 For larger batches, add a bucketed sampler that groups images by resolution.
 
 #### Training Script Launch ####
-python -m flux2.training_script \
-    --device mps \
+HF_HUB_OFFLINE=1 python -m flux2.training_script \
+    --device cuda \
     --steps 2 \
     --val_every 2 \
     --log_every 1 \
@@ -183,8 +183,10 @@ def encode_batch(
     """
     # --- Image encoding ---
     # default_prep: RGB, cap pixels, center-crop to multiple of 16, -> tensor [-1, 1]
+    # Use the VAE's own dtype (float32) to avoid conv bias dtype mismatch
+    ae_dtype = next(ae.parameters()).dtype
     img_tensors = [
-        default_prep(img, limit_pixels=limit_pixels).to(device=device, dtype=dtype)
+        default_prep(img, limit_pixels=limit_pixels).to(device=device, dtype=ae_dtype)
         for img in images
     ]
 

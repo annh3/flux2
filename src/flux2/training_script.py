@@ -399,7 +399,7 @@ def train(args):
 
             # --- Rectified flow forward process ---
             noise = torch.randn_like(img_latents)
-            t = sample_timesteps(B, device)                    # [B]
+            t = sample_timesteps(B, device).to(dtype)          # [B]
             t_exp = t[:, None, None]                           # [B, 1, 1]
             x_t = t_exp * img_latents + (1.0 - t_exp) * noise
             target_velocity = img_latents - noise

@@ -5,6 +5,7 @@ import torch
 from einops import rearrange
 from torch import Tensor, nn
 from torch.nn import functional as F
+import torch.utils.checkpoint as checkpoint
 
 
 @dataclass
@@ -154,12 +155,13 @@ class Flux2(nn.Module):
         pe = torch.cat((pe_ctx, pe_x), dim=2)
 
         for block in self.single_blocks:
-            img, _ = block.forward_kv_extract(
+            img, _ = checkpoint(
+                lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
                 img,
                 pe,
                 single_block_mod,
                 num_txt_tokens,
-                num_ref_tokens=0,
+                use_reentrant=False
             )
 
         img = img[:, num_txt_tokens:, ...]

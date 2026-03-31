@@ -314,13 +314,23 @@ class Flux2(nn.Module):
         pe = torch.cat((pe_ctx, pe_x), dim=2)
 
         for i, block in enumerate(self.single_blocks):
-            img = block.forward_kv_cached(
-                img,
-                pe,
-                single_block_mod,
-                num_txt_tokens,
-                kv_cache["single_blocks"][i],
-            )
+            if self.gradient_checkpointing:
+                img, _ = checkpoint(
+                    lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
+                    img,
+                    pe,
+                    single_block_mod,
+                    num_txt_tokens,
+                    use_reentrant=False
+                )
+            else:
+                img = block.forward_kv_cached(
+                    img,
+                    pe,
+                    single_block_mod,
+                    num_txt_tokens,
+                    kv_cache["single_blocks"][i],
+                )
 
         # Strip txt tokens only (no ref tokens in sequence)
         img = img[:, num_txt_tokens:, ...]

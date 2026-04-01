@@ -51,9 +51,10 @@ class Klein4BParams:
 
 
 class Flux2(nn.Module):
-    def __init__(self, params: Flux2Params):
+    def __init__(self, params: Flux2Params, gradient_checkpointing: bool = False):
         super().__init__()
 
+        self.gradient_checkpointing = gradient_checkpointing
         self.in_channels = params.in_channels
         self.out_channels = params.in_channels
         if params.hidden_size % params.num_heads != 0:
@@ -155,14 +156,17 @@ class Flux2(nn.Module):
         pe = torch.cat((pe_ctx, pe_x), dim=2)
 
         for block in self.single_blocks:
-            img, _ = checkpoint(
-                lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
-                img,
-                pe,
-                single_block_mod,
-                num_txt_tokens,
-                use_reentrant=False
-            )
+            if self.gradient_checkpointing:
+                img, _ = checkpoint(
+                    lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
+                    img,
+                    pe,
+                    single_block_mod,
+                    num_txt_tokens,
+                    use_reentrant=False
+                )
+            else:
+                img, _ = block.forward_kv_extract(img, pe, single_block_mod, num_txt_tokens, num_ref_tokens=0)
 
         img = img[:, num_txt_tokens:, ...]
 

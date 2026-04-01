@@ -273,15 +273,12 @@ def train(args):
     dtype = torch.bfloat16
 
     # --- Load model, VAE, text encoder via util.py helpers ---
-    model = load_flow_model("flux.2-klein-9b", device=device)
+    model = load_flow_model("flux.2-klein-9b", device=device, gradient_checkpointing=args.gradient_checkpointing)
     ae = load_ae("flux.2-klein-9b", device=device)
     text_encoder = load_text_encoder("flux.2-klein-9b", device=device)
 
     ae.eval()
     text_encoder.eval()
-
-    if args.gradient_checkpointing:
-        model.gradient_checkpointing = True
 
     trainable = list(model.parameters())
     n_trainable = sum(p.numel() for p in trainable)

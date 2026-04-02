@@ -141,10 +141,10 @@ class TestKlein1BMPSGradientCheckpointing:
             results[gc] = after_mb - before_mb
 
         with capsys.disabled():
-            print(f"\n[memory | MPS (net delta) | Klein1B]")
+            print("\n[memory | MPS (net delta) | Klein1B]")
             print(f"  plain  (gc=False): {results[False]:.1f} MB")
             print(f"  checkp (gc=True):  {results[True]:.1f} MB")
-            print(f"  note: torch.mps has no peak-memory API; run CUDA test for true peak")
+            print("  note: torch.mps has no peak-memory API; run CUDA test for true peak")
 
     def test_time_profiling(self, capsys):
         """
@@ -166,7 +166,7 @@ class TestKlein1BMPSGradientCheckpointing:
             results[gc] = (time.perf_counter() - t0) / REPEATS * 1000  # ms/iter
 
         with capsys.disabled():
-            print(f"\n[time | MPS | Klein1B]")
+            print("\n[time | MPS | Klein1B]")
             print(f"  plain  (gc=False): {results[False]:.1f} ms/iter")
             print(f"  checkp (gc=True):  {results[True]:.1f} ms/iter")
             overhead = (results[True] - results[False]) / max(results[False], 1e-6) * 100
@@ -230,10 +230,10 @@ class TestKlein9BMPSGradientCheckpointing:
             results[gc] = after_mb - before_mb
 
         with capsys.disabled():
-            print(f"\n[memory | MPS (net delta) | Klein9B]")
+            print("\n[memory | MPS (net delta) | Klein9B]")
             print(f"  plain  (gc=False): {results[False]:.1f} MB")
             print(f"  checkp (gc=True):  {results[True]:.1f} MB")
-            print(f"  note: torch.mps has no peak-memory API; run CUDA test for true peak")
+            print("  note: torch.mps has no peak-memory API; run CUDA test for true peak")
 
     def test_time_profiling(self, capsys):
         """
@@ -255,7 +255,7 @@ class TestKlein9BMPSGradientCheckpointing:
             results[gc] = (time.perf_counter() - t0) / REPEATS * 1000  # ms/iter
 
         with capsys.disabled():
-            print(f"\n[time | MPS | Klein9B]")
+            print("\n[time | MPS | Klein9B]")
             print(f"  plain  (gc=False): {results[False]:.1f} ms/iter")
             print(f"  checkp (gc=True):  {results[True]:.1f} ms/iter")
             overhead = (results[True] - results[False]) / max(results[False], 1e-6) * 100
@@ -326,7 +326,7 @@ class TestKlein9BGradientCheckpointing:
             torch.cuda.empty_cache()
 
         with capsys.disabled():
-            print(f"\n[memory | CUDA | Klein9B]")
+            print("\n[memory | CUDA | Klein9B]")
             print(f"  plain  (gc=False): {results[False]:.1f} MB")
             print(f"  checkp (gc=True):  {results[True]:.1f} MB")
             reduction = (results[False] - results[True]) / max(results[False], 1e-6) * 100
@@ -358,7 +358,7 @@ class TestKlein9BGradientCheckpointing:
             torch.cuda.empty_cache()
 
         with capsys.disabled():
-            print(f"\n[time | CUDA | Klein9B]")
+            print("\n[time | CUDA | Klein9B]")
             print(f"  plain  (gc=False): {results[False]:.1f} ms/iter")
             print(f"  checkp (gc=True):  {results[True]:.1f} ms/iter")
             overhead = (results[True] - results[False]) / max(results[False], 1e-6) * 100

@@ -3,18 +3,21 @@ Unit tests for gradient checkpointing in Flux2.
 
 Uses randomly-initialised weights (no pretrained download needed).
 
-Two test suites:
+Three test suites:
   - TestKlein1BMPSGradientCheckpointing: ~1B model on MPS (local Mac, Apple Silicon)
-  - TestKlein9BGradientCheckpointing: full Klein9B architecture, requires CUDA
+  - TestKlein9BMPSGradientCheckpointing: Klein9B model on MPS (local Mac, requires ~36 GB unified memory)
+  - TestKlein9BGradientCheckpointing: Klein9B model on CUDA (GH200)
 
 Run all tests:
     pytest tests/test_gradient_checkpointing.py -v -s
 
-# Note that MPS test doesn't test for the maximum amount of memory allocated at any time
 Run only the ~1B MPS tests (local Mac, Apple Silicon):
     pytest tests/test_gradient_checkpointing.py::TestKlein1BMPSGradientCheckpointing -v -s
 
-Run only the Klein9B tests (requires CUDA):
+Run only the Klein9B MPS tests (local Mac, ~36 GB unified memory required):
+    pytest tests/test_gradient_checkpointing.py::TestKlein9BMPSGradientCheckpointing -v -s
+
+Run only the Klein9B CUDA tests (requires CUDA):
     pytest tests/test_gradient_checkpointing.py::TestKlein9BGradientCheckpointing -v -s
 """
 
@@ -164,6 +167,95 @@ class TestKlein1BMPSGradientCheckpointing:
 
         with capsys.disabled():
             print(f"\n[time | MPS | Klein1B]")
+            print(f"  plain  (gc=False): {results[False]:.1f} ms/iter")
+            print(f"  checkp (gc=True):  {results[True]:.1f} ms/iter")
+            overhead = (results[True] - results[False]) / max(results[False], 1e-6) * 100
+            print(f"  overhead: {overhead:+.1f}%")
+
+
+# ---------------------------------------------------------------------------
+# Tests — Klein9B model (MPS, local Mac)
+# 256x256 image → 16x16 latent grid (L=256), 64 text tokens
+# Requires ~36 GB unified memory (float32 weights)
+# ---------------------------------------------------------------------------
+
+class TestKlein9BMPSGradientCheckpointing:
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.device = torch.device("mps")
+        self.dtype  = torch.float32  # bfloat16 not supported on MPS
+        self.params = Klein9BParams()
+
+    def _make_model(self, gradient_checkpointing: bool) -> Flux2:
+        model = Flux2(self.params, gradient_checkpointing=gradient_checkpointing)
+        return model.to(device=self.device, dtype=self.dtype).train()
+
+    def test_outputs_match(self):
+        """GC and non-GC models with identical weights should produce identical outputs."""
+        model_plain = self._make_model(gradient_checkpointing=False)
+        model_gc    = self._make_model(gradient_checkpointing=True)
+        model_gc.load_state_dict(model_plain.state_dict())
+
+        out_plain = run_forward_backward(model_plain, self.device, self.dtype, h=16, w=16, t=64)
+        out_gc    = run_forward_backward(model_gc,    self.device, self.dtype, h=16, w=16, t=64)
+
+        assert torch.allclose(out_plain, out_gc, atol=1e-3), (
+            f"Max abs diff: {(out_plain - out_gc).abs().max().item():.6f}"
+        )
+
+    def test_gradients_exist(self):
+        """Both variants should produce non-None gradients after backward."""
+        for gc in (False, True):
+            model = self._make_model(gradient_checkpointing=gc)
+            run_forward_backward(model, self.device, self.dtype, h=16, w=16, t=64)
+            for name, p in model.named_parameters():
+                assert p.grad is not None, f"[gc={gc}] {name} has no gradient"
+
+    def test_memory_profiling(self, capsys):
+        """
+        Profile and print MPS memory for plain vs gradient-checkpointed forward+backward.
+        Uses current_allocated_memory() before/after — torch.mps has no peak memory API,
+        so this measures net allocation delta rather than true peak. No assertion.
+        """
+        results = {}
+
+        for gc in (False, True):
+            model = self._make_model(gradient_checkpointing=gc)
+            torch.mps.empty_cache()
+            before_mb = torch.mps.current_allocated_memory() / 1024 ** 2
+            run_forward_backward(model, self.device, self.dtype, h=16, w=16, t=64)
+            torch.mps.synchronize()
+            after_mb = torch.mps.current_allocated_memory() / 1024 ** 2
+            results[gc] = after_mb - before_mb
+
+        with capsys.disabled():
+            print(f"\n[memory | MPS (net delta) | Klein9B]")
+            print(f"  plain  (gc=False): {results[False]:.1f} MB")
+            print(f"  checkp (gc=True):  {results[True]:.1f} MB")
+            print(f"  note: torch.mps has no peak-memory API; run CUDA test for true peak")
+
+    def test_time_profiling(self, capsys):
+        """
+        Profile and print wall-clock time for plain vs gradient-checkpointed forward+backward.
+        No strict assertion — GC trades memory for compute time.
+        """
+        REPEATS = 3
+        results = {}
+
+        for gc in (False, True):
+            model = self._make_model(gradient_checkpointing=gc)
+            run_forward_backward(model, self.device, self.dtype, h=16, w=16, t=64)  # warm-up
+            torch.mps.synchronize()
+
+            t0 = time.perf_counter()
+            for _ in range(REPEATS):
+                run_forward_backward(model, self.device, self.dtype, h=16, w=16, t=64)
+            torch.mps.synchronize()
+            results[gc] = (time.perf_counter() - t0) / REPEATS * 1000  # ms/iter
+
+        with capsys.disabled():
+            print(f"\n[time | MPS | Klein9B]")
             print(f"  plain  (gc=False): {results[False]:.1f} ms/iter")
             print(f"  checkp (gc=True):  {results[True]:.1f} ms/iter")
             overhead = (results[True] - results[False]) / max(results[False], 1e-6) * 100

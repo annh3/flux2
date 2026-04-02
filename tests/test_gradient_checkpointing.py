@@ -172,7 +172,7 @@ class TestKlein1BMPSGradientCheckpointing:
 
 # ---------------------------------------------------------------------------
 # Tests — Klein9B model (CUDA)
-# 512x512 image → 32x32 latent grid (L=1024), 128 text tokens
+# 1024x1024 image → 64x64 latent grid (L=4096), 128 text tokens
 # ---------------------------------------------------------------------------
 
 class TestKlein9BGradientCheckpointing:
@@ -199,8 +199,8 @@ class TestKlein9BGradientCheckpointing:
         model_gc    = self._make_model(gradient_checkpointing=True)
         model_gc.load_state_dict(model_plain.state_dict())
 
-        out_plain = run_forward_backward(model_plain, self.device, self.dtype)
-        out_gc    = run_forward_backward(model_gc,    self.device, self.dtype)
+        out_plain = run_forward_backward(model_plain, self.device, self.dtype, h=64, w=64)
+        out_gc    = run_forward_backward(model_gc,    self.device, self.dtype, h=64, w=64)
 
         assert torch.allclose(out_plain, out_gc, atol=1e-3), (
             f"Max abs diff: {(out_plain - out_gc).abs().max().item():.6f}"
@@ -210,7 +210,7 @@ class TestKlein9BGradientCheckpointing:
         """Both variants should produce non-None gradients after backward."""
         for gc in (False, True):
             model = self._make_model(gradient_checkpointing=gc)
-            run_forward_backward(model, self.device, self.dtype)
+            run_forward_backward(model, self.device, self.dtype, h=64, w=64)
             for name, p in model.named_parameters():
                 assert p.grad is not None, f"[gc={gc}] {name} has no gradient"
             del model
@@ -227,7 +227,7 @@ class TestKlein9BGradientCheckpointing:
             model = self._make_model(gradient_checkpointing=gc)
             torch.cuda.reset_peak_memory_stats(self.device)
             torch.cuda.synchronize(self.device)
-            run_forward_backward(model, self.device, self.dtype)
+            run_forward_backward(model, self.device, self.dtype, h=64, w=64)
             torch.cuda.synchronize(self.device)
             results[gc] = torch.cuda.max_memory_allocated(self.device) / 1024 ** 2
             del model
@@ -254,12 +254,12 @@ class TestKlein9BGradientCheckpointing:
 
         for gc in (False, True):
             model = self._make_model(gradient_checkpointing=gc)
-            run_forward_backward(model, self.device, self.dtype)  # warm-up
+            run_forward_backward(model, self.device, self.dtype, h=64, w=64)  # warm-up
             torch.cuda.synchronize(self.device)
 
             t0 = time.perf_counter()
             for _ in range(REPEATS):
-                run_forward_backward(model, self.device, self.dtype)
+                run_forward_backward(model, self.device, self.dtype, h=64, w=64)
             torch.cuda.synchronize(self.device)
             results[gc] = (time.perf_counter() - t0) / REPEATS * 1000  # ms/iter
             del model

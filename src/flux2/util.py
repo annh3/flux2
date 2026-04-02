@@ -88,7 +88,7 @@ FLUX2_MODEL_INFO = {
 }
 
 
-def load_flow_model(model_name: str, debug_mode: bool = False, device: str | torch.device = "cuda") -> Flux2:
+def load_flow_model(model_name: str, debug_mode: bool = False, device: str | torch.device = "cuda", gradient_checkpointing: bool = False) -> Flux2:
     config = FLUX2_MODEL_INFO[model_name.lower()]
 
     if debug_mode:
@@ -116,14 +116,14 @@ def load_flow_model(model_name: str, debug_mode: bool = False, device: str | tor
 
     if not debug_mode:
         with torch.device("meta"):
-            model = Flux2(FLUX2_MODEL_INFO[model_name.lower()]["params"]).to(torch.bfloat16)
+            model = Flux2(FLUX2_MODEL_INFO[model_name.lower()]["params"], gradient_checkpointing=gradient_checkpointing).to(torch.bfloat16)
         print(f"Loading {weight_path} for the FLUX.2 weights")
         sd = load_sft(weight_path, device=str(device))
         model.load_state_dict(sd, strict=True, assign=True)
         return model.to(device)
     else:
         with torch.device(device):
-            return Flux2(FLUX2_MODEL_INFO[model_name.lower()]["params"]).to(torch.bfloat16)
+            return Flux2(FLUX2_MODEL_INFO[model_name.lower()]["params"], gradient_checkpointing=gradient_checkpointing).to(torch.bfloat16)
 
 
 def load_text_encoder(model_name: str, device: str | torch.device = "cuda"):

@@ -5,6 +5,7 @@ import torch
 from einops import rearrange
 from torch import Tensor, nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
 
 
 @dataclass
@@ -36,6 +37,20 @@ class Klein9BParams:
 
 
 @dataclass
+class Klein1BParams:
+    in_channels: int = 128
+    context_in_dim: int = 4096
+    hidden_size: int = 1536  # hidden_size / num_heads = 128 = sum(axes_dim)
+    num_heads: int = 12
+    depth: int = 6
+    depth_single_blocks: int = 16
+    axes_dim: list[int] = field(default_factory=lambda: [32, 32, 32, 32])
+    theta: int = 2000
+    mlp_ratio: float = 3.0
+    use_guidance_embed: bool = False
+
+
+@dataclass
 class Klein4BParams:
     in_channels: int = 128
     context_in_dim: int = 7680
@@ -50,9 +65,10 @@ class Klein4BParams:
 
 
 class Flux2(nn.Module):
-    def __init__(self, params: Flux2Params):
+    def __init__(self, params: Flux2Params, gradient_checkpointing: bool = False):
         super().__init__()
 
+        self.gradient_checkpointing = gradient_checkpointing
         self.in_channels = params.in_channels
         self.out_channels = params.in_channels
         if params.hidden_size % params.num_heads != 0:
@@ -79,6 +95,7 @@ class Flux2(nn.Module):
                     self.hidden_size,
                     self.num_heads,
                     mlp_ratio=params.mlp_ratio,
+                    gradient_checkpointing=gradient_checkpointing,
                 )
                 for _ in range(params.depth)
             ]
@@ -90,6 +107,7 @@ class Flux2(nn.Module):
                     self.hidden_size,
                     self.num_heads,
                     mlp_ratio=params.mlp_ratio,
+                    gradient_checkpointing=gradient_checkpointing,
                 )
                 for _ in range(params.depth_single_blocks)
             ]
@@ -141,26 +159,14 @@ class Flux2(nn.Module):
 
         for block in self.double_blocks:
             img, txt, _ = block.forward_kv_extract(
-                img,
-                txt,
-                pe_x,
-                pe_ctx,
-                double_block_mod_img,
-                double_block_mod_txt,
-                num_ref_tokens=0,
+                img, txt, pe_x, pe_ctx, double_block_mod_img, double_block_mod_txt, num_ref_tokens=0,
             )
 
         img = torch.cat((txt, img), dim=1)
         pe = torch.cat((pe_ctx, pe_x), dim=2)
 
         for block in self.single_blocks:
-            img, _ = block.forward_kv_extract(
-                img,
-                pe,
-                single_block_mod,
-                num_txt_tokens,
-                num_ref_tokens=0,
-            )
+            img, _ = block.forward_kv_extract(img, pe, single_block_mod, num_txt_tokens, num_ref_tokens=0)
 
         img = img[:, num_txt_tokens:, ...]
 
@@ -312,13 +318,23 @@ class Flux2(nn.Module):
         pe = torch.cat((pe_ctx, pe_x), dim=2)
 
         for i, block in enumerate(self.single_blocks):
-            img = block.forward_kv_cached(
-                img,
-                pe,
-                single_block_mod,
-                num_txt_tokens,
-                kv_cache["single_blocks"][i],
-            )
+            if self.gradient_checkpointing:
+                img, _ = checkpoint(
+                    lambda *args, b=block: b.forward_kv_extract(*args, num_ref_tokens=0),
+                    img,
+                    pe,
+                    single_block_mod,
+                    num_txt_tokens,
+                    use_reentrant=False
+                )
+            else:
+                img = block.forward_kv_cached(
+                    img,
+                    pe,
+                    single_block_mod,
+                    num_txt_tokens,
+                    kv_cache["single_blocks"][i],
+                )
 
         # Strip txt tokens only (no ref tokens in sequence)
         img = img[:, num_txt_tokens:, ...]
@@ -440,9 +456,11 @@ class SingleStreamBlock(nn.Module):
         hidden_size: int,
         num_heads: int,
         mlp_ratio: float = 4.0,
+        gradient_checkpointing: bool = False,
     ):
         super().__init__()
 
+        self.gradient_checkpointing = gradient_checkpointing
         self.hidden_dim = hidden_size
         self.num_heads = num_heads
         head_dim = hidden_size // num_heads
@@ -492,6 +510,23 @@ class SingleStreamBlock(nn.Module):
         num_ref_tokens: int,
     ) -> tuple[Tensor, dict]:
         """Forward with causal attention. Extracts and returns ref KV cache."""
+        if self.gradient_checkpointing and num_ref_tokens == 0:
+            mod_shift, mod_scale, mod_gate = mod
+
+            def _inner(x, pe, mod_shift, mod_scale, mod_gate):
+                q, k, v, mlp, mod_gate = self._qkv(x, (mod_shift, mod_scale, mod_gate))
+                q, k = apply_rope(q, k, pe)
+                attn = causal_attn_fn(q, k, v, num_txt_tokens, 0)
+                return self._out(x, attn, mlp, mod_gate)
+
+            out = checkpoint(_inner, x, pe, mod_shift, mod_scale, mod_gate, use_reentrant=False)
+            head_dim = self.hidden_size // self.num_heads
+            cache = {
+                "k_ref": x.new_empty(x.shape[0], self.num_heads, 0, head_dim),
+                "v_ref": x.new_empty(x.shape[0], self.num_heads, 0, head_dim),
+            }
+            return out, cache
+
         q, k, v, mlp, mod_gate = self._qkv(x, mod)
         q, k = apply_rope(q, k, pe)
 
@@ -527,8 +562,10 @@ class DoubleStreamBlock(nn.Module):
         hidden_size: int,
         num_heads: int,
         mlp_ratio: float,
+        gradient_checkpointing: bool = False,
     ):
         super().__init__()
+        self.gradient_checkpointing = gradient_checkpointing
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         self.num_heads = num_heads
         assert hidden_size % num_heads == 0, f"{hidden_size=} must be divisible by {num_heads=}"
@@ -645,6 +682,35 @@ class DoubleStreamBlock(nn.Module):
         num_ref_tokens: int,
     ) -> tuple[Tensor, Tensor, dict]:
         """Forward with causal attention. img has layout [ref, img]. Extracts ref KV cache."""
+        if self.gradient_checkpointing and num_ref_tokens == 0:
+            img_mod1, img_mod2 = mod_img
+            txt_mod1, txt_mod2 = mod_txt
+            num_txt_tokens = txt.shape[1]
+
+            def _inner(img, txt, pe, pe_ctx, *mod_tensors):
+                (i1s, i1sc, i1g, i2s, i2sc, i2g, t1s, t1sc, t1g, t2s, t2sc, t2g) = mod_tensors
+                mod_img_ = ((i1s, i1sc, i1g), (i2s, i2sc, i2g))
+                mod_txt_ = ((t1s, t1sc, t1g), (t2s, t2sc, t2g))
+                q, k, v, pe_full, num_txt_tokens_, mods = self._prepare_qkv(img, txt, pe, pe_ctx, mod_img_, mod_txt_)
+                q, k = apply_rope(q, k, pe_full)
+                attn = causal_attn_fn(q, k, v, num_txt_tokens_, 0)
+                txt_attn, img_attn = attn[:, :num_txt_tokens_], attn[:, num_txt_tokens_:]
+                img, txt = self._apply_residuals(img, txt, img_attn, txt_attn, mods)
+                return img, txt
+
+            img, txt = checkpoint(
+                _inner,
+                img, txt, pe, pe_ctx,
+                *img_mod1, *img_mod2, *txt_mod1, *txt_mod2,
+                use_reentrant=False,
+            )
+            head_dim = self.hidden_size // self.num_heads
+            cache = {
+                "k_ref": img.new_empty(img.shape[0], self.num_heads, 0, head_dim),
+                "v_ref": img.new_empty(img.shape[0], self.num_heads, 0, head_dim),
+            }
+            return img, txt, cache
+
         q, k, v, pe_full, num_txt_tokens, mods = self._prepare_qkv(img, txt, pe, pe_ctx, mod_img, mod_txt)
         q, k = apply_rope(q, k, pe_full)
 
@@ -807,10 +873,12 @@ def causal_attn_fn(
         attn_txt = attn_txt_img[:, :, :ref_start, :]
         attn_img = attn_txt_img[:, :, ref_start:, :]
 
-        # ref only attends to itself
-        attn_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref, is_causal=False)
-
-        out = torch.cat([attn_txt, attn_ref, attn_img], dim=2)
+        if num_ref_tokens > 0:
+            # ref only attends to itself
+            attn_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref, is_causal=False)
+            out = torch.cat([attn_txt, attn_ref, attn_img], dim=2)
+        else:
+            out = torch.cat([attn_txt, attn_img], dim=2)
 
     return rearrange(out, "b h n d -> b n (h d)")
 

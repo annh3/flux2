@@ -156,15 +156,27 @@ class Flux2(nn.Module):
         pe_ctx = self.pe_embedder(ctx_ids)
 
         for block in self.double_blocks:
-            img, txt, _ = block.forward_kv_extract(
-                img,
-                txt,
-                pe_x,
-                pe_ctx,
-                double_block_mod_img,
-                double_block_mod_txt,
-                num_ref_tokens=0,
-            )
+            if self.gradient_checkpointing:
+                img, txt, _ = checkpoint(
+                    lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
+                    img,
+                    txt,
+                    pe_x,
+                    pe_ctx,
+                    double_block_mod_img,
+                    double_block_mod_txt,
+                    use_reentrant=False,
+                )
+            else:
+                img, txt, _ = block.forward_kv_extract(
+                    img,
+                    txt,
+                    pe_x,
+                    pe_ctx,
+                    double_block_mod_img,
+                    double_block_mod_txt,
+                    num_ref_tokens=0,
+                )
 
         img = torch.cat((txt, img), dim=1)
         pe = torch.cat((pe_ctx, pe_x), dim=2)

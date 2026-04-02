@@ -5,7 +5,7 @@ import torch
 from einops import rearrange
 from torch import Tensor, nn
 from torch.nn import functional as F
-import torch.utils.checkpoint as checkpoint
+from torch.utils.checkpoint import checkpoint
 
 
 @dataclass
@@ -30,6 +30,20 @@ class Klein9BParams:
     num_heads: int = 32
     depth: int = 8
     depth_single_blocks: int = 24
+    axes_dim: list[int] = field(default_factory=lambda: [32, 32, 32, 32])
+    theta: int = 2000
+    mlp_ratio: float = 3.0
+    use_guidance_embed: bool = False
+
+
+@dataclass
+class Klein1BParams:
+    in_channels: int = 128
+    context_in_dim: int = 4096
+    hidden_size: int = 1536  # hidden_size / num_heads = 128 = sum(axes_dim)
+    num_heads: int = 12
+    depth: int = 6
+    depth_single_blocks: int = 16
     axes_dim: list[int] = field(default_factory=lambda: [32, 32, 32, 32])
     theta: int = 2000
     mlp_ratio: float = 3.0
@@ -823,10 +837,12 @@ def causal_attn_fn(
         attn_txt = attn_txt_img[:, :, :ref_start, :]
         attn_img = attn_txt_img[:, :, ref_start:, :]
 
-        # ref only attends to itself
-        attn_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref, is_causal=False)
-
-        out = torch.cat([attn_txt, attn_ref, attn_img], dim=2)
+        if num_ref_tokens > 0:
+            # ref only attends to itself
+            attn_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref, is_causal=False)
+            out = torch.cat([attn_txt, attn_ref, attn_img], dim=2)
+        else:
+            out = torch.cat([attn_txt, attn_img], dim=2)
 
     return rearrange(out, "b h n d -> b n (h d)")
 

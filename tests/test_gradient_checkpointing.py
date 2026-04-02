@@ -213,6 +213,8 @@ class TestKlein9BGradientCheckpointing:
             run_forward_backward(model, self.device, self.dtype)
             for name, p in model.named_parameters():
                 assert p.grad is not None, f"[gc={gc}] {name} has no gradient"
+            del model
+            torch.cuda.empty_cache()
 
     def test_memory_profiling(self, capsys):
         """
@@ -228,6 +230,8 @@ class TestKlein9BGradientCheckpointing:
             run_forward_backward(model, self.device, self.dtype)
             torch.cuda.synchronize(self.device)
             results[gc] = torch.cuda.max_memory_allocated(self.device) / 1024 ** 2
+            del model
+            torch.cuda.empty_cache()
 
         with capsys.disabled():
             print(f"\n[memory | CUDA | Klein9B]")
@@ -258,6 +262,8 @@ class TestKlein9BGradientCheckpointing:
                 run_forward_backward(model, self.device, self.dtype)
             torch.cuda.synchronize(self.device)
             results[gc] = (time.perf_counter() - t0) / REPEATS * 1000  # ms/iter
+            del model
+            torch.cuda.empty_cache()
 
         with capsys.disabled():
             print(f"\n[time | CUDA | Klein9B]")

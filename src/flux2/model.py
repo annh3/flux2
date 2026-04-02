@@ -158,7 +158,7 @@ class Flux2(nn.Module):
         for block in self.double_blocks:
             if self.gradient_checkpointing:
                 img, txt, _ = checkpoint(
-                    lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
+                    lambda *args, b=block: b.forward_kv_extract(*args, num_ref_tokens=0),
                     img,
                     txt,
                     pe_x,
@@ -184,7 +184,7 @@ class Flux2(nn.Module):
         for block in self.single_blocks:
             if self.gradient_checkpointing:
                 img, _ = checkpoint(
-                    lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
+                    lambda *args, b=block: b.forward_kv_extract(*args, num_ref_tokens=0),
                     img,
                     pe,
                     single_block_mod,
@@ -346,7 +346,7 @@ class Flux2(nn.Module):
         for i, block in enumerate(self.single_blocks):
             if self.gradient_checkpointing:
                 img, _ = checkpoint(
-                    lambda *args: block.forward_kv_extract(*args, num_ref_tokens=0),
+                    lambda *args, b=block: b.forward_kv_extract(*args, num_ref_tokens=0),
                     img,
                     pe,
                     single_block_mod,
